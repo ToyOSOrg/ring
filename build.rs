@@ -310,16 +310,21 @@ fn ring_build_rs_main(c_root_dir: &Path, core_name_and_version: &str) {
     let endian = env::var("CARGO_CFG_TARGET_ENDIAN").unwrap();
     let is_little_endian = endian == "little";
 
-    let is_git = fs::metadata(c_root_dir.join(".git")).is_ok();
+    // `pregenerated/` is made by `mk/package.sh` and is never committed, so it
+    // exists exactly in a packaged tree. A packaged tree may still have a
+    // `.git` of its own, e.g. when it is consumed as a Cargo `git` dependency
+    // from a repository that commits the package's contents, so `.git` does
+    // not tell the two cases apart.
+    let is_packaged = c_root_dir.join(PREGENERATED).is_dir();
 
     // Published builds are always built in release mode.
-    let is_debug = is_git && env::var("DEBUG").unwrap() != "false";
+    let is_debug = !is_packaged && env::var("DEBUG").unwrap() != "false";
 
     // During local development, force warnings in non-Rust code to be treated
     // as errors. Since warnings are highly compiler-dependent and compilers
     // don't maintain backward compatibility w.r.t. which warnings they issue,
     // don't do this for packaged builds.
-    let force_warnings_into_errors = is_git;
+    let force_warnings_into_errors = !is_packaged;
 
     let target = Target {
         arch,
@@ -337,15 +342,15 @@ fn ring_build_rs_main(c_root_dir: &Path, core_name_and_version: &str) {
         None
     };
 
-    // If `.git` exists then assume this is the "local hacking" case where
-    // we want to make it easy to build *ring* using `cargo build`/`cargo test`
-    // without a prerequisite `package` step, at the cost of needing additional
-    // tools like `Perl` and/or `nasm`.
+    // If `pregenerated/` doesn't exist then assume this is the "local hacking"
+    // case where we want to make it easy to build *ring* using `cargo build`/
+    // `cargo test` without a prerequisite `package` step, at the cost of
+    // needing additional tools like `Perl` and/or `nasm`.
     //
-    // If `.git` doesn't exist then assume that this is a packaged build where
+    // If `pregenerated/` exists then assume that this is a packaged build where
     // we want to optimize for minimizing the build tools required: No Perl,
     // no nasm, etc.
-    let generated_dir = if !is_git {
+    let generated_dir = if is_packaged {
         c_root_dir.join(PREGENERATED)
     } else {
         generate_sources_and_preassemble(
